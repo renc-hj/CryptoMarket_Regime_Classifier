@@ -13,7 +13,7 @@ Pipeline Overview
 
 From raw data to deployable model:
 
-1. Data Fetching – Periodically pulls OHLCV data (5m, 15m, 1h) from Binance.
+1. Data Fetching – Periodically pulls OHLCV data (5m, 15m) from Binance.
 
 2. Feature Engineering – Computes momentum, volatility, and trend indicators across timeframes.
 
@@ -27,7 +27,7 @@ From raw data to deployable model:
 
 
 ## Key Features
-- Multi-timeframe data (5m, 15m, 1h) from Binance
+- Multi-timeframe data (5m, 15m) from Binance
 - Feature engineering with technical indicators (momentum, volatility, trend)
 - Hidden Markov Models (HMM) for unsupervised regime discovery
 - LSTM classifier trained on HMM-labeled sequences
