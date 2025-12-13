@@ -1,48 +1,77 @@
-CryptoMarket Regime Classifier
-==============================
+# CryptoMarket Regime Classifier
 **Adaptive Market Intelligence for Crypto Strategies**
 
-Trading strategies don’t exist in a vacuum — they succeed or fail depending on the market regime they operate in. A breakout strategy that crushes in a trending market will bleed in a choppy one.
+Most trading strategies fail not because the logic is wrong, but because they are applied in the wrong **market regime**.
 
-CryptoMarket Regime Classifier is a complete machine learning pipeline that identifies and predicts market regimes in crypto markets using multi-timeframe data, technical features, Hidden Markov Models (HMM), and LSTMs.
+A breakout strategy thrives in trends and bleeds in chop.  
+Mean-reversion works in ranges and dies in momentum.
 
-It’s designed as a foundational intelligence layer for strategy selection, position sizing, and risk management — and will power the regime-awareness module in Dazai[].
+**CryptoMarket Regime Classifier** is a machine learning pipeline that detects and predicts crypto market regimes using **multi-timeframe OHLCV data**, **technical indicators**, and a **two-stage ML approach (HMM → LSTM)**.
 
-Pipeline Overview
+It is built as a **foundational intelligence layer** for:
+- strategy selection  
+- position sizing  
+- risk management  
+
+and is intended to power the regime-awareness module in **Dazai**.
+
+---
+
+## High-Level Pipeline
+**OHLCV (5m, 15m)**
+        ↓
+**Feature Engineering (momentum, trend, volatility)**
+        ↓
+**PCA Reduction**
+        ↓
+**Hidden Markov Model (Regime Discovery)**
+        ↓
+**LSTM (Regime Prediction)**
+        ↓
+**Current Regime (+ future probabilistic output)**
+
 --------
 
-From raw data to deployable model:
+## Key Ideas (Why this is different)
 
-1. Data Fetching – Periodically pulls OHLCV data (5m, 15m) from Binance.
+- **Regime-aware, not signal-based**  
+  The model does not predict price — it predicts *market conditions*.
 
-2. Feature Engineering – Computes momentum, volatility, and trend indicators across timeframes.
+- **Unsupervised → Supervised learning**  
+  HMM discovers latent regimes first.  
+  LSTM then learns temporal structure to predict them.
 
-3. Unsupervised Labeling (HMM) – Uses PCA-reduced feature space to discover market regimes.
+- **Multi-timeframe context**  
+  Combines short-term and slightly higher-timeframe behavior (5m, 15m).
 
-4. Supervised Prediction (LSTM) – Trains a sequence model on HMM labels to predict regimes.
+- **Designed for integration**  
+  Models and scalers are exported for downstream systems (bots, dashboards, APIs).
 
-5. Model Export – Saves trained model & scalers for integration with live systems.
-
-6. Live Classification – Periodically classifies the current regime with plans for probabilistic outputs.
-
+---
 
 ## Key Features
-- Multi-timeframe data (5m, 15m) from Binance
-- Feature engineering with technical indicators (momentum, volatility, trend)
-- Hidden Markov Models (HMM) for unsupervised regime discovery
-- LSTM classifier trained on HMM-labeled sequences
-- 6 distinct regimes identified:
-    -- Choppy High-Volatility
-    -- Strong Trend
-    -- Volatility Spike
-    -- Weak Trend
-    -- Range
-    -- Squeeze
-- Plug-and-play model + scaler for downstream usage
-- Evaluation metrics: Precision, Recall, F1 Score, Confusion Matrix
-    
 
-📂 Project Structure
+- Multi-timeframe OHLCV data (5m, 15m) from Binance  
+- Technical indicators covering:
+  - momentum  
+  - volatility  
+  - trend  
+- Hidden Markov Models (HMM) for unsupervised regime discovery  
+- LSTM trained on HMM-labeled sequences  
+- **6 discovered regimes**, including:
+  - Strong Trend  
+  - Weak Trend  
+  - Range  
+  - Choppy High-Volatility  
+  - Volatility Spike  
+  - Squeeze  
+- Evaluation metrics:
+  - Precision / Recall / F1  
+  - Confusion Matrix  
+
+---
+
+## Project Structure
 --------------------
 ├── dashboard/        # Visualizations, regime plots  
 ├── models/           # Trained models & scalers  
@@ -51,87 +80,62 @@ From raw data to deployable model:
 ├── requirements.txt  # Dependencies  
 └── README.md
 
-⚙️ Workflow
------------
 
-1. **Data Fetching**
+---
 
-    * Periodically fetches OHLCV data from Binance.
+## Workflow Details
 
-    * Currently optimized for 5m data (can be adapted for other timeframes).
+### 1. Data Fetching
+- Periodically fetches OHLCV data from Binance  
+- Currently optimized for **5m data**, with support for higher TF context  
 
-2. **Feature Engineering**
+### 2. Feature Engineering
+- Computes momentum, trend, and volatility indicators  
+- Aligns and scales features for ML stability  
 
-    Calculates multi-timeframe indicators: momentum, trend, volatility.
+### 3. Regime Discovery (HMM)
+- PCA-reduced feature space  
+- **6-state HMM selected using lowest BIC**
+- Produces regime labels without human bias  
 
-    Scales and normalizes data for ML pipelines.
+### 4. Regime Prediction (LSTM)
+- Sequence model trained on HMM labels  
+- Captures temporal transitions between regimes  
+- Hyperparameters tuned using Keras Tuner  
+- Planned upgrade: **probabilistic regime distributions**
 
-3. **Regime Discovery (HMM)**
+### 5. Model Export & Usage
+- Trained LSTM + scalers saved to `/models`  
+- Designed for reuse in live systems  
 
-    PCA-reduced features used for Hidden Markov Model labeling.
+---
 
-    Optimal configuration: 6 states, 4 PCA components (lowest BIC).
+## Results (High-Level)
 
-4. **Regime Prediction (LSTM)**
+- Strong separation between **trend vs non-trend** regimes  
+- Transitional regimes (range ↔ weak trend, spike ↔ chop) are naturally harder — and informative  
+- Confusion matrix reflects realistic regime overlap instead of artificial sharp boundaries  
 
-    Sequence model trained on HMM labels.
+---
 
-    Hyperparameter tuning via Keras Tuner.
+## Installation
 
-    Planned: probabilistic regime outputs (distribution across states).
-
-5. **Model Export & Live Integration**
-
-    Saves trained LSTM + scaler for downstream usage.
-
-    Periodically classifies current market regime.
-
-    Future: direct integration with Dazai’s trading logic.
-        
-
-📊 Results
-----------
-
-*   LSTM successfully distinguishes between complex market states.
-    
-*   Confusion matrix shows strong performance in trend vs. non-trend regimes.
-    
-*   Transitional regimes (weak trend ↔ range, volatility spike ↔ choppy) remain challenging but meaningful.
-    
-
-🔮 Future Work
---------------
-
-*    Probabilistic regime predictions for richer decision-making.
-
-*    Real-time integration with live trading pipelines.
-
-*    Reinforcement Learning for adaptive position sizing.
-
-*    Explainability layer (feature importance, transition probabilities).
-
-*    Exploration of alternative regime discovery techniques (Bayesian HMM, clustering).
-    
-
-🛠️ Installation
-----------------
+```bash
 git clone https://github.com/akash-kumar5/CryptoMarket_Regime_Classifier.git
 cd CryptoMarket_Regime_Classifier
 pip install -r requirements.txt
+```        
 
-
-▶️ Usage
+ Usage
 --------
 
 Run the full pipeline:
+streamlit run dashboard/app.py
 
-python main.py
-
-    
 
 Models & scalers will be saved in /models for reuse.
 
-📌 Notes
+ Notes
 --------
 
 *   Data range: ~2 years (to prioritize recent regime behavior and avoid stale market patterns).
@@ -139,3 +143,8 @@ Models & scalers will be saved in /models for reuse.
 *   Designed as a **research + foundational tool** for live trading systems.
     
 *   Future versions will connect directly into **Dazai** as a core regime intelligence component.
+# -----
+# Disclaimer
+
+This project is for research and educational purposes only.
+It does not constitute financial advice.
