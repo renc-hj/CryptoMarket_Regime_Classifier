@@ -8,7 +8,10 @@ import joblib
 
 # add src path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-from src.regime_label import get_hmm_features, train_hmm, map_states_to_regimes  # <- unify import
+from src.regime_label import (
+    get_hmm_features, train_hmm, map_states_to_regimes,
+    get_transition_probabilities, get_steady_state_distribution,
+)
 
 DATA_FOLDER = "data/"
 MODELS_FOLDER = "models/"
@@ -148,11 +151,18 @@ if 'labeled_df' in st.session_state:
     }).reset_index(drop=True)
     st.dataframe(freq_df, use_container_width=True)
 
-    # transition matrix
-    st.subheader("Transition matrix (rows=from, cols=to)")
-    trans = np.round(hmm_model.transmat_, 4)
-    trans_df = pd.DataFrame(trans, columns=[f"to_{i}" for i in range(trans.shape[1])], index=[f"from_{i}" for i in range(trans.shape[0])])
-    st.dataframe(trans_df, use_container_width=True)
+    # transition matrix with regime labels
+    st.subheader("Transition Probabilities (rows=from, cols=to)")
+    inv_mapping = {v: k for k, v in state_mapping.items()}
+    regime_map_int = {i: state_mapping.get(i, f"State_{i}") for i in range(n_components)}
+    trans_df = get_transition_probabilities(hmm_model, regime_map=regime_map_int).round(4)
+    st.dataframe(trans_df.style.background_gradient(cmap="Blues", axis=1), use_container_width=True)
+
+    # steady-state distribution
+    st.subheader("Steady-State Distribution (long-run time in each regime)")
+    steady = get_steady_state_distribution(hmm_model, regime_map=regime_map_int)
+    steady_df = pd.DataFrame({"regime": steady.index, "probability": steady.values}).round(4)
+    st.dataframe(steady_df, use_container_width=True)
 
     # per-state feature summary (means & std) – use whatever exists in DF
     st.subheader("Per-state feature summary (means & std)")

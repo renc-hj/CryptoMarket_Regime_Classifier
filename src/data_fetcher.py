@@ -1,11 +1,14 @@
 # src/binance_fetcher.py
 import os
 import time
+import logging
 import requests
 import pandas as pd
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 SESSION = requests.Session()
 OUT_DIR = "data"
@@ -112,8 +115,8 @@ def fetch_aggtrades_parallel(symbol: str, start_ms: int, end_ms: int, out_path: 
             try:
                 data = fut.result()
                 if data: all_trades.extend(data)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.warning(f"Chunk fetch failed: {e}")
     if not all_trades:
         df = pd.DataFrame(columns=['aggTradeId','price','qty','first_trade_id','last_trade_id','timestamp'])
         if out_path: df.to_csv(out_path, index=False)

@@ -21,7 +21,7 @@ MODEL_FOLDER = "models/"
 SYMBOL = "BTCUSDT"
 MAIN_TIMEFRAME = "5m"
 CONTEXT_TIMEFRAMES = ["15m", "1m"]
-TIME_STEPS = 64
+TIME_STEPS = 48
 
 
 def standardize_ohlcv(raw_dataframe: pd.DataFrame, timeframe: str) -> pd.DataFrame:
@@ -53,7 +53,7 @@ def standardize_ohlcv(raw_dataframe: pd.DataFrame, timeframe: str) -> pd.DataFra
     except Exception as exc:
         raise ValueError(f"Unsupported timeframe format: {timeframe}") from exc
 
-    pandas_offset = f"{minutes}T"  # e.g., "5T"
+    pandas_offset = f"{minutes}min"  # e.g., "5min"
     dataframe["timestamp"] = dataframe["timestamp"].dt.floor(pandas_offset)
 
     return dataframe[["timestamp", "open", "high", "low", "close", "volume"]]
@@ -100,14 +100,15 @@ class LiveInferencePipeline:
         # In-memory OHLCV store: {timeframe: DataFrame[timestamp, open, high, low, close, volume]}
         self.data_store: dict[str, pd.DataFrame] = {}
 
-        # Pre-fill with historical data
-        self._prefill_data(days_back=200)
+        # Pre-fill with historical data (7 days is enough for feature computation + lookback)
+        self._prefill_data(days_back=7)
 
     def _prefill_data(self, days_back: int = 200) -> None:
         start_datetime = datetime.utcnow() - timedelta(days=days_back)
         start_ms = int(start_datetime.timestamp() * 1000)
 
         for timeframe in [MAIN_TIMEFRAME] + CONTEXT_TIMEFRAMES:
+            print(f"  Fetching {timeframe} data ({days_back} days)...")
             raw = fetch_binance_klines(SYMBOL, timeframe, start_time_ms=start_ms)
             if raw is None or raw.empty:
                 self.data_store[timeframe] = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
@@ -153,8 +154,8 @@ class LiveInferencePipeline:
 
                 self.data_store[timeframe] = self._append_and_dedupe(self.data_store[timeframe], latest_raw, timeframe)
 
-            # Trim memory to recent window (200 days)
-            cutoff = pd.Timestamp.utcnow().tz_localize("UTC") - pd.Timedelta(days=200)
+            # Trim memory to recent window (7 days)
+            cutoff = pd.Timestamp.utcnow().tz_localize("UTC") - pd.Timedelta(days=7)
             for timeframe in [MAIN_TIMEFRAME] + CONTEXT_TIMEFRAMES:
                 frame = self.data_store[timeframe]
                 if not frame.empty:
@@ -164,18 +165,104 @@ class LiveInferencePipeline:
             print("refresh_data error:", exc)
 
 
+def run_cli_prediction(pipeline, symbol=SYMBOL, sequence_length=TIME_STEPS, confidence_threshold=0.4):
+    """
+    Run a single prediction cycle and print results to terminal.
+    Returns the result dict or None.
+    """
+    from src.data_cleaner import merge_timeframes, to_pandas_freq
+    from src.compute_features import build_features
+
+    pipeline.refresh_data(fetch_open_candles=False)
+
+    # Standardize and drop unclosed candles
+    main_frame = standardize_ohlcv(pipeline.data_store[MAIN_TIMEFRAME], MAIN_TIMEFRAME)
+    main_frame = drop_last_if_unclosed(main_frame, MAIN_TIMEFRAME)
+
+    context_frames_map = {
+        tf: drop_last_if_unclosed(standardize_ohlcv(pipeline.data_store[tf], tf), tf)
+        for tf in CONTEXT_TIMEFRAMES
+    }
+
+    merged = merge_timeframes(
+        symbol=symbol,
+        main_tf=MAIN_TIMEFRAME,
+        context_tfs=CONTEXT_TIMEFRAMES,
+        klines_map={MAIN_TIMEFRAME: main_frame, **context_frames_map},
+    )
+
+    features = build_features(merged, main_tf=MAIN_TIMEFRAME, context_tfs=CONTEXT_TIMEFRAMES)
+
+    if "timestamp" not in features.columns:
+        if isinstance(features.index, pd.DatetimeIndex):
+            features = features.reset_index().rename(columns={"index": "timestamp"})
+        elif "timestamp" in merged.columns:
+            features["timestamp"] = merged["timestamp"]
+
+    if len(features) < sequence_length:
+        print(f"  Not enough data yet ({len(features)} rows, need {sequence_length})")
+        return None
+
+    window = features[pipeline.feature_columns].tail(sequence_length)
+    if window.isna().any().any():
+        print("  NaN in feature window, skipping")
+        return None
+
+    scaled = pipeline.scaler.transform(window)
+    batched = np.expand_dims(scaled, axis=0)
+
+    probs = pipeline.model.predict(batched, verbose=0)[0]
+    class_idx = int(np.argmax(probs))
+    regime = pipeline.regime_map.get(class_idx, "Unknown")
+    conf = float(probs[class_idx])
+
+    last_ts = pd.to_datetime(features["timestamp"].iloc[-1], utc=True)
+
+    # Print results
+    low_conf = conf < confidence_threshold
+    status = " ⚠ LOW CONFIDENCE" if low_conf else ""
+    print(f"\n{'='*60}")
+    print(f"  Time:       {last_ts.strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"  Regime:     {regime}{status}")
+    print(f"  Confidence: {conf:.2%}")
+    print(f"  {'─'*40}")
+
+    # All regime probabilities
+    for regime_name, cid in sorted(pipeline.metadata["regime_map"].items(), key=lambda x: -float(probs[int(x[1])])):
+        p = float(probs[int(cid)])
+        bar = "█" * int(p * 30)
+        print(f"    {regime_name:<18s} {p:6.2%}  {bar}")
+
+    print(f"{'='*60}\n")
+    return {"timestamp": last_ts, "regime": regime, "confidence": conf}
+
+
 if __name__ == "__main__":
-    # Optional CLI loop to keep the store hot (no prediction here)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Live BTC regime prediction (terminal)")
+    parser.add_argument("--interval", type=int, default=300, help="Seconds between predictions (default: 300 = 5min)")
+    parser.add_argument("--threshold", type=float, default=0.4, help="Confidence threshold (default: 0.4)")
+    parser.add_argument("--once", action="store_true", help="Run a single prediction and exit")
+    args = parser.parse_args()
+
+    print(f"Loading model from {MODEL_FOLDER}...")
     pipeline = LiveInferencePipeline(
         model_path=os.path.join(MODEL_FOLDER, "lstm_regime_model.keras"),
         scaler_path=os.path.join(MODEL_FOLDER, "scaler.joblib"),
         metadata_path=os.path.join(MODEL_FOLDER, "lstm_model_metadata.json"),
     )
+    print(f"Model loaded. Features: {len(pipeline.feature_columns)}, Regimes: {len(pipeline.regime_map)}")
+    print(f"Regime map: {pipeline.regime_map}")
 
-    # refresh every 5 minutes
-    pipeline.refresh_data(fetch_open_candles=False)
-    schedule.every(5).minutes.do(lambda: pipeline.refresh_data(fetch_open_candles=False))
-
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+    if args.once:
+        run_cli_prediction(pipeline, confidence_threshold=args.threshold)
+    else:
+        print(f"\nRunning predictions every {args.interval}s. Press Ctrl+C to stop.\n")
+        while True:
+            try:
+                run_cli_prediction(pipeline, confidence_threshold=args.threshold)
+                time.sleep(args.interval)
+            except KeyboardInterrupt:
+                print("\nStopped.")
+                break

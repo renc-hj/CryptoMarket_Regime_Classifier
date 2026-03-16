@@ -126,3 +126,56 @@ def map_states_to_regimes(df, labels, main_tf='5m'):
         vol_spike:      'Volatility Spike',
     }
     return mapping
+
+
+def get_transition_probabilities(model, regime_map=None):
+    """
+    Extract the transition probability matrix from a fitted HMM model.
+    Returns a DataFrame where cell (i, j) = P(next_state=j | current_state=i).
+
+    Args:
+        model (hmm.GaussianHMM): Fitted HMM model.
+        regime_map (dict, optional): {state_int: regime_name} mapping for readable labels.
+
+    Returns:
+        pd.DataFrame: Transition probability matrix with regime labels.
+    """
+    transmat = model.transmat_
+    n_states = transmat.shape[0]
+
+    if regime_map:
+        labels = [regime_map.get(i, f"State_{i}") for i in range(n_states)]
+    else:
+        labels = [f"State_{i}" for i in range(n_states)]
+
+    return pd.DataFrame(transmat, index=labels, columns=labels)
+
+
+def get_steady_state_distribution(model, regime_map=None):
+    """
+    Compute the steady-state (stationary) distribution of the HMM.
+    This represents the long-run proportion of time spent in each regime.
+
+    Args:
+        model (hmm.GaussianHMM): Fitted HMM model.
+        regime_map (dict, optional): {state_int: regime_name} mapping.
+
+    Returns:
+        pd.Series: Steady-state probability per regime.
+    """
+    transmat = model.transmat_
+    n_states = transmat.shape[0]
+
+    # Solve pi @ T = pi, sum(pi) = 1 via eigenvalue decomposition
+    eigenvalues, eigenvectors = np.linalg.eig(transmat.T)
+    # Find eigenvector for eigenvalue closest to 1
+    idx = np.argmin(np.abs(eigenvalues - 1.0))
+    steady = np.real(eigenvectors[:, idx])
+    steady = steady / steady.sum()
+
+    if regime_map:
+        labels = [regime_map.get(i, f"State_{i}") for i in range(n_states)]
+    else:
+        labels = [f"State_{i}" for i in range(n_states)]
+
+    return pd.Series(steady, index=labels, name="steady_state_prob")

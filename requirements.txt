@@ -1,3 +1,12 @@
 streamlit
+streamlit-autorefresh
 pandas
+numpy
 requests
+scikit-learn
+hmmlearn
+tensorflow
+keras-tuner
+joblib
+TA-Lib
+matplotlib

@@ -135,6 +135,9 @@ streamlit run dashboard/app.py
 
 Models & scalers will be saved in /models for reuse.
 
+**Run the live inference: **
+python live_inference.py
+
  Notes
 --------
 

@@ -25,6 +25,6 @@
         "bb_width_15m",
         "rsi_14_15m"
     ],
-    "time_steps": 64,
-    "training_file": "BTCUSDT_combined_klines_20221107_20251106_states6_labeled.csv"
+    "time_steps": 48,
+    "training_file": "BTCUSDT_combined_klines_20230316_20260315_states6_labeled.csv"
 }

@@ -36,6 +36,11 @@ sequence_length = st.sidebar.number_input(
     "Sequence length", min_value=16, max_value=512, value=TIME_STEPS, step=1
 )
 
+confidence_threshold = st.sidebar.slider(
+    "Confidence threshold", min_value=0.0, max_value=1.0, value=0.4, step=0.05,
+    help="Predictions below this confidence are flagged as 'Low Confidence'",
+)
+
 auto_refresh_seconds = st.sidebar.slider("Auto refresh (seconds)", min_value=5, max_value=60, value=10)
 live_toggle = st.sidebar.checkbox("Live (auto refresh)", value=False)
 run_once_button = st.sidebar.button("Run once (closed candle only)")
@@ -190,10 +195,14 @@ def run_prediction(fetch_open_candles: bool = False):
 
     last_ts = latest_timestamp_from_features(features)
 
+    conf = float(probabilities[class_index])
+    is_low_confidence = conf < confidence_threshold
+
     return {
         "timestamp": last_ts,
         "regime": predicted_regime,
-        "confidence": float(probabilities[class_index]),
+        "confidence": conf,
+        "low_confidence": is_low_confidence,
         "probs": {
             regime_name: float(probabilities[int(class_id)])
             for regime_name, class_id in pipeline.metadata["regime_map"].items()
@@ -226,6 +235,12 @@ if live_toggle:
 # display last prediction
 if st.session_state.audit_log:
     latest = st.session_state.audit_log[-1]
-    st.subheader(f"Current Regime: {latest['regime']} — {latest['confidence']:.2%}")
+    if latest.get("low_confidence", False):
+        st.warning(
+            f"Low Confidence Prediction: {latest['regime']} — {latest['confidence']:.2%} "
+            f"(below {confidence_threshold:.0%} threshold)"
+        )
+    else:
+        st.subheader(f"Current Regime: {latest['regime']} — {latest['confidence']:.2%}")
 
 st.dataframe(pd.DataFrame(st.session_state.audit_log))
